@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML5driver Torso</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px);
+    pointer-events: none; z-index: 100;
+  }
+
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.8) 100%);
+    pointer-events: none; z-index: 99;
+  }
+
+  .screen {
+    width: min(90vw, 720px);
+    aspect-ratio: 4/3;
+    position: relative;
+    background: #050505;
+    border: 2px solid #222;
+    box-shadow: 0 0 0 1px #333, 0 0 40px rgba(0,0,100,0.3), inset 0 0 60px rgba(0,0,0,0.8);
+  }
+
+  canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+
+  .upload-id {
+    position: absolute; bottom: 8px; right: 12px;
+    font-size: clamp(8px, 1.2vw, 13px);
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.1em; z-index: 10;
+  }
+
+  .slide-label {
+    position: absolute; bottom: 8px; left: 12px;
+    font-size: clamp(8px, 1.2vw, 13px);
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 0.08em; z-index: 10;
+  }
+
+  .title-bar {
+    width: min(90vw, 720px);
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 8px 4px; margin-top: 12px;
+  }
+
+  .title-bar h1 {
+    font-family: 'Orbitron', monospace; font-weight: 900;
+    font-size: clamp(12px, 2.5vw, 22px);
+    color: #f0f0f0; letter-spacing: 0.15em;
+    text-shadow: 0 0 20px rgba(255,255,255,0.4);
+  }
+
+  .title-bar .sub {
+    font-size: clamp(8px, 1vw, 11px);
+    color: rgba(255,255,255,0.3);
+    letter-spacing: 0.2em; text-transform: uppercase;
+  }
+
+  .status-bar {
+    width: min(90vw, 720px);
+    display: flex; gap: 20px; padding: 4px 4px 0;
+    font-size: clamp(7px, 0.9vw, 10px);
+    color: rgba(255,255,255,0.2); letter-spacing: 0.15em;
+  }
+
+  .status-bar span { animation: blink 2s step-end infinite; }
+  .status-bar span:nth-child(2) { animation-delay: 0.7s; }
+  .status-bar span:nth-child(3) { animation-delay: 1.4s; }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.88);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200; cursor: pointer;
+    color: rgba(255,255,255,0.55);
+    font-size: clamp(12px, 2vw, 18px);
+    letter-spacing: 0.25em; text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">▶ &nbsp; Click to Start</div>
+
+<div class="title-bar">
+  <h1>HTML5DRIVER TORSO</h1>
+  <span class="sub">test card generator</span>
+</div>
+
+<div class="screen">
+  <canvas id="c"></canvas>
+  <div class="upload-id" id="uid">tmg 000001</div>
+  <div class="slide-label" id="slide">aqua.flv – Slide 0000</div>
+</div>
+
+<div class="status-bar">
+  <span id="ts">--:--:--</span>
+  <span>CHANNEL: <span id="ch">01</span></span>
+  <span>FORMAT: H.264/AAC</span>
+  <span>STATUS: UPLOADING</span>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const uidEl = document.getElementById('uid');
+const tsEl = document.getElementById('ts');
+const chEl = document.getElementById('ch');
+const slideEl = document.getElementById('slide');
+const overlay = document.getElementById('overlay');
+
+const noiseCanvas = document.createElement('canvas');
+const noiseCtx = noiseCanvas.getContext('2d');
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = Math.round(rect.width);
+  canvas.height = Math.round(rect.height);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Audio ──────────────────────────────────────────────────────────────────
+let audioCtx = null;
+let currentOsc = null;
+let currentGain = null;
+
+// Real Webdriver Torso tones: random sine wave, 550–1350 Hz range
+function startBeep() {
+  if (!audioCtx) return;
+  stopBeep();
+
+  const freq = 550 + Math.random() * 800; // 550–1350 Hz like the real thing
+
+  currentOsc = audioCtx.createOscillator();
+  currentGain = audioCtx.createGain();
+  currentOsc.connect(currentGain);
+  currentGain.connect(audioCtx.destination);
+
+  currentOsc.type = 'sine';
+  currentOsc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  currentGain.gain.setValueAtTime(0.28, audioCtx.currentTime);
+
+  currentOsc.start(audioCtx.currentTime);
+}
+
+function stopBeep() {
+  if (currentOsc) {
+    try {
+      currentGain.gain.setValueAtTime(currentGain.gain.value, audioCtx.currentTime);
+      currentGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.01);
+      currentOsc.stop(audioCtx.currentTime + 0.015);
+    } catch(e) {}
+    currentOsc = null;
+    currentGain = null;
+  }
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let uploadCount = 1;
+let slideCount = 0;
+let frameCount = 0;
+let shapes = [];
+let noisePhase = 0;
+
+const palettes = [
+  { bg: '#f0f0f0', a: '#dd1111', b: '#1122cc' },
+  { bg: '#eeeeee', a: '#cc0000', b: '#0044dd' },
+  { bg: '#f5f5f5', a: '#ee2200', b: '#002299' },
+];
+let pal = palettes[0];
+
+function newSlide() {
+  pal = palettes[Math.floor(Math.random() * palettes.length)];
+  shapes = [];
+  const n = 2;
+  const w = canvas.width, h = canvas.height;
+  // Blue first (drawn under red)
+  const bw = (0.15 + Math.random() * 0.5) * w;
+  const bh = (0.15 + Math.random() * 0.5) * h;
+  shapes.push({ x: Math.random() * (w - bw), y: Math.random() * (h - bh), w: bw, h: bh, color: pal.b });
+  // Red on top
+  const rw = (0.15 + Math.random() * 0.5) * w;
+  const rh = (0.15 + Math.random() * 0.5) * h;
+  shapes.push({ x: Math.random() * (w - rw), y: Math.random() * (h - rh), w: rw, h: rh, color: pal.a });
+
+  slideCount++;
+  slideEl.textContent = `aqua.flv – Slide ${String(slideCount % 10000).padStart(4,'0')}`;
+}
+
+function drawNoise(alpha) {
+  if (noiseCanvas.width !== canvas.width || noiseCanvas.height !== canvas.height) {
+    noiseCanvas.width = canvas.width;
+    noiseCanvas.height = canvas.height;
+  }
+  const img = noiseCtx.createImageData(canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = (Math.random() * 25) | 0;
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = (alpha * 255) | 0;
+  }
+  noiseCtx.putImageData(img, 0, 0);
+  ctx.drawImage(noiseCanvas, 0, 0);
+}
+
+function drawFrame() {
+  // White background like the real videos
+  ctx.fillStyle = pal.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Rectangles — static, not moving (real Webdriver Torso doesn't animate within a slide)
+  for (const s of shapes) {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+  }
+
+  // Subtle noise
+  drawNoise(0.025 + Math.sin(noisePhase) * 0.01);
+  noisePhase += 0.07;
+
+  // Occasional scan flicker
+  if (Math.random() < 0.02) {
+    ctx.fillStyle = `rgba(255,255,255,${0.04 + Math.random() * 0.08})`;
+    ctx.fillRect(0, Math.random() * canvas.height, canvas.width, 1 + Math.random() * 2);
+  }
+
+  frameCount++;
+
+  // Timecode
+  const f = frameCount % (25 * 60);
+  const secs = Math.floor(f / 25) % 60;
+  const mins = Math.floor(frameCount / (25 * 60));
+  tsEl.textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}:${String(f % 25).padStart(2,'0')}`;
+
+  // New slide every 1 second (60fps)
+  if (frameCount % 60 === 0) {
+    // Every 10 slides = new upload
+    if (slideCount % 10 === 0) {
+      uploadCount++;
+      uidEl.textContent = `tmg${String(uploadCount).padStart(7,'0')}`;
+      chEl.textContent = String(1 + Math.floor(Math.random() * 99)).padStart(2,'0');
+    }
+    stopBeep();
+    newSlide();
+    startBeep();
+  }
+
+  requestAnimationFrame(drawFrame);
+}
+
+overlay.addEventListener('click', () => {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  overlay.remove();
+  newSlide();
+  startBeep();
+  drawFrame();
+});
+</script>
+</body>
+</html>
